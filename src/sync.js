@@ -6,6 +6,7 @@ import { log } from './logger.js';
 import { alert, resolve } from './notify.js';
 import * as gm from './gitManager.js';
 import * as st from './syncthing.js';
+import { checkVault } from './vaultFiles.js';
 
 // One sync cycle, strictly serialized:
 //   Syncthing settled? → conflict copies? → commit → fetch → rebase (folder paused) → push
@@ -92,6 +93,14 @@ async function cycle(trigger) {
     if (!settled) {
       log.info('Syncthing not settled — deferring until it goes idle', { state: status.state, needTotalItems: status.needTotalItems });
       return;
+    }
+
+    // Setup checks: alert, but keep syncing — a bad rule is not a reason to stop backups.
+    const failedChecks = (await checkVault()).filter(c => c.ok === false);
+    if (failedChecks.length) {
+      alert('vault-setup', 'Vault setup problem', failedChecks.map(c => `✗ ${c.label}${c.detail ? ` — ${c.detail}` : ''}`).join('\n'));
+    } else {
+      resolve('vault-setup');
     }
 
     // 2. Conflict copies. They are git-ignored, so committing is safe; the

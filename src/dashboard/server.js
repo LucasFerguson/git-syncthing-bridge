@@ -8,7 +8,7 @@ import config from '../config.js';
 import { log, bus as logBus } from '../logger.js';
 import { activeAlerts } from '../notify.js';
 import { getStatus } from '../gitManager.js';
-import { listTree } from '../vaultFiles.js';
+import { listTree, vaultChecks } from '../vaultFiles.js';
 import { requestCycle, getState, syncEvents } from '../sync.js';
 import { watcher } from '../syncthing.js';
 
@@ -81,6 +81,7 @@ app.get('/api/status', async (_req, res) => {
       syncthing: syncthingState,
       bridge: getState(),
       alerts: activeAlerts(),
+      checks: vaultChecks(),
       commitMode: config.commitMode,
       git: await getStatus(),
     });

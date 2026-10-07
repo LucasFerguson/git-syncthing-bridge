@@ -51,6 +51,9 @@ const config = {
   // "warn": alert on .sync-conflict files but keep committing other notes.
   // "block": no commits at all until every conflict copy is resolved.
   conflictPolicy: process.env.CONFLICT_POLICY || 'warn',
+  // Keep .obsidian (plugins, themes, settings) out of Syncthing so the phone
+  // and the vault repo each keep their own configuration.
+  syncthingIgnoreObsidian: (process.env.SYNCTHING_IGNORE_OBSIDIAN ?? 'true') !== 'false',
 
   notifyUrl: process.env.NOTIFY_URL || '',
   notifyToken: process.env.NOTIFY_TOKEN || '',

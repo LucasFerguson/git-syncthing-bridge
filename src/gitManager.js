@@ -131,6 +131,12 @@ export async function behindCount() {
   return Number(await git('rev-list', '--count', range));
 }
 
+// Would git ignore this path? Works for paths that do not exist (--no-index
+// also answers for tracked files), so it can probe the effective .gitignore rules.
+export async function gitIgnores(path) {
+  return (await run(['check-ignore', '-q', '--no-index', '--', path])).code === 0;
+}
+
 // How git sees a path: 'ignored', 'tracked' (in HEAD) or 'new'. Used to label
 // change logs, since Syncthing reports new files as "modified".
 export async function pathKind(path) {

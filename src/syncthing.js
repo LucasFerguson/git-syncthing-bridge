@@ -58,6 +58,18 @@ export async function isPaused() {
   return !!f.paused;
 }
 
+// The folder's ignore patterns: `ignore` is the raw .stignore lines, `expanded`
+// the patterns Syncthing actually applies (with #include resolved).
+export async function getIgnores() {
+  const r = await api(`/rest/db/ignores?folder=${encodeURIComponent(FOLDER)}`);
+  return { ignore: r.ignore ?? [], expanded: r.expanded ?? [] };
+}
+
+// Writing through the API applies the new rules immediately (it also writes .stignore).
+export async function setIgnores(lines) {
+  await api(`/rest/db/ignores?folder=${encodeURIComponent(FOLDER)}`, { method: 'POST', body: { ignore: lines } });
+}
+
 // Ask Syncthing to rescan now (after git changed files) instead of waiting for the watcher.
 export const rescan = () => api(`/rest/db/scan?folder=${encodeURIComponent(FOLDER)}`, { method: 'POST' });
 

@@ -44,6 +44,12 @@
     .kv dt { color: var(--muted); }
     .badge.unreachable, .badge.paused { background: #450a0a; color: var(--red); }
     .log-line span:last-child { overflow-wrap: anywhere; }
+    #checks { list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    #checks .mark { display: inline-block; width: 18px; font-weight: 700; }
+    #checks .ok .mark { color: var(--green); }
+    #checks .bad .mark { color: var(--red); }
+    #checks .pending .mark { color: var(--yellow); }
+    #checks .detail { color: var(--muted); font-size: 12px; margin-left: 18px; }
     #tree-panel .head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
     #tree-panel .head h2 { margin: 0; }
     #tree-filter { flex: 1; max-width: 280px; background: #080a0f; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
@@ -91,6 +97,11 @@
     <div class="card" id="commits">
       <h2>Recent Commits</h2>
       <ul id="commit-list"><li style="color:var(--muted)">Loading…</li></ul>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h2>Vault Setup Checks</h2>
+      <ul id="checks"><li style="color:var(--muted)">Run after the first sync cycle…</li></ul>
     </div>
 
     <div class="card" id="problems" style="grid-column:1/-1;display:none">
@@ -163,7 +174,16 @@
     async function loadStatus() {
       const res = await fetch('/api/status');
       if (!res.ok) return;
-      const { git, bridge, alerts, commitMode } = await res.json();
+      const { git, bridge, alerts, commitMode, checks } = await res.json();
+      if (checks?.length) {
+        $('checks').replaceChildren(...checks.map(c => {
+          const cls = c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'pending';
+          const li = el('li', cls);
+          li.append(el('span', 'mark', c.ok === true ? '✓' : c.ok === false ? '✗' : '…'), document.createTextNode(c.label));
+          if (c.detail) li.append(el('div', 'detail', c.detail));
+          return li;
+        }));
+      }
       if (!git) return;
       $('mode').textContent = commitMode === 'daily' ? 'one commit per day (pushed after midnight)' : 'commit + push on every change';
       $('uncommitted').textContent = `${git.uncommitted} file(s)`;

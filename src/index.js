@@ -54,11 +54,11 @@ st.watcher.on('resync', () => scheduleCycle('syncthing-resync'));
 setInterval(() => requestCycle('timer'), config.pullIntervalMs);
 
 try {
-  await ensureVaultFiles();
-  // Syncthing may still be starting after a reboot; startup() needs it to clear
-  // a stale pause, so retry for a few minutes before giving up.
+  // Syncthing may still be starting after a reboot; both steps need its API
+  // (.stignore is written through it), so retry for a few minutes.
   for (let attempt = 1; ; attempt++) {
     try {
+      await ensureVaultFiles();
       await startup();
       break;
     } catch (err) {
