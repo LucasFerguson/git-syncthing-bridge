@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Git-Syncthing Bridge</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+      --text: #e2e8f0; --muted: #64748b;
+      --green: #22c55e; --yellow: #eab308; --red: #ef4444; --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; font-size: 14px; }
+    header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+    .badge.idle    { background: #14532d; color: var(--green); }
+    .badge.syncing { background: #1c3461; color: var(--blue); }
+    .badge.scanning{ background: #422006; color: var(--yellow); }
+    .badge.error   { background: #450a0a; color: var(--red); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px 24px; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 12px; }
+    .stat { font-size: 22px; font-weight: 700; }
+    .sub  { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    button { padding: 7px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #log-panel { grid-column: 1 / -1; }
+    #log-box { height: 360px; overflow-y: auto; background: #080a0f; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+    .log-line { display: flex; gap: 8px; }
+    .log-line .ts { color: var(--muted); flex-shrink: 0; }
+    .log-line.INFO  .lvl { color: var(--green); }
+    .log-line.WARN  .lvl { color: var(--yellow); }
+    .log-line.ERROR .lvl { color: var(--red); }
+    .log-line.DEBUG .lvl { color: var(--muted); }
+    .conflicts { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; margin-top: 8px; display: none; }
+    .conflicts h3 { color: var(--red); font-size: 13px; margin-bottom: 6px; }
+    .conflicts ul { padding-left: 16px; font-size: 12px; color: #fca5a5; }
+    #commits ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    #commits li { border-left: 2px solid var(--blue); padding-left: 10px; }
+    #commits .hash { font-family: monospace; font-size: 11px; color: var(--muted); }
+    #commits .msg  { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Git-Syncthing Bridge</h1>
+    <span id="sync-badge" class="badge idle">idle</span>
+    <span id="conn-badge" class="badge error" style="margin-left:auto">disconnected</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Last Commit</h2>
+      <div class="stat" id="last-hash">—</div>
+      <div class="sub" id="last-ts">—</div>
+      <div class="actions">
+        <button class="btn-primary" id="btn-commit">Commit &amp; Push</button>
+        <button class="btn-secondary" id="btn-pull">Pull Now</button>
+      </div>
+    </div>
+
+    <div class="card" id="commits">
+      <h2>Recent Commits</h2>
+      <ul id="commit-list"><li style="color:var(--muted)">Loading…</li></ul>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <div class="conflicts" id="conflict-box">
+        <h3>⚠ Sync Conflicts Detected</h3>
+        <ul id="conflict-list"></ul>
+      </div>
+    </div>
+
+    <div class="card" id="log-panel" style="grid-column:1/-1">
+      <h2>Live Log</h2>
+      <div id="log-box"></div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const logBox = document.getElementById('log-box');
+    const syncBadge = document.getElementById('sync-badge');
+    const connBadge = document.getElementById('conn-badge');
+    const conflictBox = document.getElementById('conflict-box');
+    const conflictList = document.getElementById('conflict-list');
+    const commitList = document.getElementById('commit-list');
+    const lastHash = document.getElementById('last-hash');
+    const lastTs = document.getElementById('last-ts');
+    const btnCommit = document.getElementById('btn-commit');
+    const btnPull = document.getElementById('btn-pull');
+
+    socket.on('connect', () => {
+      connBadge.textContent = 'connected';
+      connBadge.className = 'badge idle';
+    });
+    socket.on('disconnect', () => {
+      connBadge.textContent = 'disconnected';
+      connBadge.className = 'badge error';
+    });
+
+    function addLog(entry) {
+      const line = document.createElement('div');
+      line.className = `log-line ${entry.level}`;
+      const ts = entry.timestamp.replace('T', ' ').replace('Z', '').substring(0, 19);
+      line.innerHTML = `<span class="ts">${ts}</span><span class="lvl">${entry.level}</span><span>${entry.message}</span>`;
+      logBox.appendChild(line);
+      logBox.scrollTop = logBox.scrollHeight;
+      if (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
+    }
+
+    socket.on('log', addLog);
+    socket.on('logHistory', entries => { logBox.innerHTML = ''; entries.forEach(addLog); });
+
+    socket.on('syncState', state => {
+      syncBadge.textContent = state;
+      syncBadge.className = `badge ${state}`;
+    });
+
+    socket.on('commit', ({ hash, files, timestamp }) => {
+      lastHash.textContent = hash.substring(0, 7);
+      lastTs.textContent = `${files} file(s) · ${new Date(timestamp).toLocaleString()}`;
+      loadStatus();
+    });
+
+    socket.on('conflict', files => {
+      conflictBox.style.display = 'block';
+      conflictList.innerHTML = files.map(f => `<li>${f}</li>`).join('');
+    });
+
+    socket.on('syncComplete', () => {
+      conflictBox.style.display = 'none';
+    });
+
+    async function loadStatus() {
+      const res = await fetch('/api/status');
+      const { git } = await res.json();
+      if (!git) return;
+      const commits = git.recentCommits || [];
+      commitList.innerHTML = commits.map(c =>
+        `<li><div class="msg">${c.message}</div><div class="hash">${c.hash.substring(0,7)} · ${new Date(c.date).toLocaleString()}</div></li>`
+      ).join('') || '<li style="color:var(--muted)">No commits yet</li>';
+      if (commits[0]) {
+        lastHash.textContent = commits[0].hash.substring(0, 7);
+        lastTs.textContent = new Date(commits[0].date).toLocaleString();
+      }
+    }
+
+    btnCommit.addEventListener('click', async () => {
+      btnCommit.disabled = true;
+      await fetch('/api/commit', { method: 'POST' });
+      btnCommit.disabled = false;
+    });
+
+    btnPull.addEventListener('click', async () => {
+      btnPull.disabled = true;
+      await fetch('/api/pull', { method: 'POST' });
+      btnPull.disabled = false;
+    });
+
+    loadStatus();
+  </script>
+</body>
+</html>
