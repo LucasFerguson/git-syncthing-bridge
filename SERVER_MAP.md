@@ -27,7 +27,7 @@
 
 - URL: http://syncthing.netbird.cloud:3000 (NetBird only; basic auth, user `admin`, password in `.env`)
 - Service: `systemctl status git-syncthing-bridge`, logs: `journalctl -u git-syncthing-bridge -f`
-- Test vault: `/opt/vault-test/` (Syncthing folder `bridge-test`, local bare remote) — temporary
+- Test vault: `/opt/vault-test/vault` (Syncthing folder `gitea-test`, remote `gitea@gitea.netbird.cloud:lucaslad/temp-test-obsidian.git`) — temporary
 
 ## Vault Git Flow
 
@@ -43,4 +43,4 @@ Gitea / GitHub remote repo
 
 Public key at `/root/.ssh/id_ed25519.pub` — added to:
 - GitHub (LucasFerguson account)
-- Gitea (for vault repo access)
+- Gitea (for vault repo access) — SSH user is `gitea@`, use host `gitea.netbird.cloud` (its clone URLs show a LAN IP this server cannot reach)

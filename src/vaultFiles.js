@@ -51,7 +51,7 @@ export async function ensureVaultFiles() {
   // would never reach the server and the bridge could not see them.
   const stignore = join(v, '.stignore');
   const st = (await exists(stignore)) ? await readFile(stignore, 'utf8') : '';
-  const lines = st.split('\n').map(l => l.trim());
+  const lines = st.split('\n').map(l => l.trim()).filter(l => !l.startsWith('//'));
   if (lines.some(l => l.includes('sync-conflict'))) {
     log.warn('.stignore lists sync-conflict files — phone-side conflicts will be hidden from the bridge');
   }
