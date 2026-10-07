@@ -8,6 +8,7 @@ import config from '../config.js';
 import { log, bus as logBus } from '../logger.js';
 import { activeAlerts } from '../notify.js';
 import { getStatus } from '../gitManager.js';
+import { listTree } from '../vaultFiles.js';
 import { requestCycle, getState, syncEvents } from '../sync.js';
 import { watcher } from '../syncthing.js';
 
@@ -83,6 +84,15 @@ app.get('/api/status', async (_req, res) => {
       commitMode: config.commitMode,
       git: await getStatus(),
     });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Folder and file names only; contents are never served.
+app.get('/api/tree', async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await listTree()) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

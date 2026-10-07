@@ -131,6 +131,14 @@ export async function behindCount() {
   return Number(await git('rev-list', '--count', range));
 }
 
+// How git sees a path: 'ignored', 'tracked' (in HEAD) or 'new'. Used to label
+// change logs, since Syncthing reports new files as "modified".
+export async function pathKind(path) {
+  if ((await run(['check-ignore', '-q', '--', path])).code === 0) return 'ignored';
+  const r = await run(['ls-tree', '--name-only', 'HEAD', '--', path]);
+  return r.code === 0 && r.stdout.trim() ? 'tracked' : 'new';
+}
+
 export async function getStatus() {
   const head = await revParse('HEAD');
   const recent = head

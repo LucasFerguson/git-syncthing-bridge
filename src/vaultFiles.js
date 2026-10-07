@@ -1,4 +1,4 @@
-import { readFile, writeFile, access } from 'fs/promises';
+import { readFile, writeFile, access, readdir } from 'fs/promises';
 import { join } from 'path';
 import config from './config.js';
 import { log } from './logger.js';
@@ -59,4 +59,28 @@ export async function ensureVaultFiles() {
     await writeFile(stignore, '// Server-local Syncthing ignores (not synced). Keep .git out of the phone.\n/.git\n' + st);
     log.info('Added /.git to .stignore');
   }
+}
+
+// Folder and file names for the dashboard's tree viewer. Names only — file
+// contents are never read. Symlinks are listed as files and not followed.
+const TREE_SKIP = new Set(['.git', '.stversions', '.stfolder']);
+const TREE_MAX_ENTRIES = 20_000;
+
+export async function listTree() {
+  let count = 0;
+  let truncated = false;
+  async function walk(dir) {
+    const node = { dirs: [], files: [] };
+    const entries = await readdir(dir, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const e of entries) {
+      if (TREE_SKIP.has(e.name)) continue;
+      if (++count > TREE_MAX_ENTRIES) { truncated = true; break; }
+      if (e.isDirectory()) node.dirs.push({ name: e.name, ...(await walk(join(dir, e.name))) });
+      else node.files.push(e.name);
+    }
+    return node;
+  }
+  const tree = await walk(config.vaultPath);
+  return { tree, count: Math.min(count, TREE_MAX_ENTRIES), truncated };
 }

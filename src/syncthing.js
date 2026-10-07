@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import config from './config.js';
 import { log } from './logger.js';
 import { alert, resolve } from './notify.js';
+import { pathKind } from './gitManager.js';
 
 // Emits:
 //   'state'  (folderState)   every folder state change, for the dashboard
@@ -15,7 +16,9 @@ const HEADERS = { 'X-API-Key': config.syncthingApiKey, 'Content-Type': 'applicat
 const LONG_POLL_S = 60;
 // A filtered event stream has its own id sequence (separate from the global
 // one), so the cursor must always come from this same filter.
-const EVENTS = '/rest/events?events=StateChanged,FolderErrors';
+const EVENTS = '/rest/events?events=StateChanged,FolderErrors,LocalChangeDetected,RemoteChangeDetected';
+// Per-file change lines logged per poll; a big batch (e.g. a photo import) is summarized.
+const MAX_CHANGE_LINES = 25;
 const UNREACHABLE_ALERT_MS = 10 * 60 * 1000;
 
 let running = false;
@@ -23,6 +26,7 @@ let lastEventId = 0;
 let startTime = null;       // Syncthing's own start time; a change means it restarted
 let downSince = null;
 let pollAbort = null;
+let deviceNames = new Map(); // full device ID -> name, for "changed by <phone>"
 
 async function api(path, { method = 'GET', body, timeoutMs = 15_000, signal } = {}) {
   const signals = [AbortSignal.timeout(timeoutMs)];
@@ -57,6 +61,37 @@ export async function isPaused() {
 // Ask Syncthing to rescan now (after git changed files) instead of waiting for the watcher.
 export const rescan = () => api(`/rest/db/scan?folder=${encodeURIComponent(FOLDER)}`, { method: 'POST' });
 
+// RemoteChangeDetected names the device by its short ID (first 7 chars).
+async function deviceName(shortId) {
+  const find = () => [...deviceNames].find(([id]) => id.startsWith(shortId))?.[1];
+  if (!find()) {
+    try {
+      const devices = await api('/rest/config/devices');
+      deviceNames = new Map(devices.map(d => [d.deviceID, d.name || d.deviceID.slice(0, 7)]));
+    } catch { /* fall back to the short ID */ }
+  }
+  return find() ?? shortId;
+}
+
+// One log line per changed file. Git-ignored paths (Obsidian's workspace
+// files, rewritten constantly) only log at debug level.
+async function logChanges(changes) {
+  let shown = 0;
+  let hidden = 0;
+  for (const ev of changes) {
+    const { action, type, path, modifiedBy } = ev.data;
+    const kind = action === 'deleted' ? null : await pathKind(path).catch(() => null);
+    const verb = action === 'deleted' ? 'deleted' : kind === 'new' ? 'created' : 'edited';
+    const what = type === 'dir' ? 'Folder' : 'File';
+    const source = ev.type === 'RemoteChangeDetected' ? `from ${await deviceName(modifiedBy)}` : 'on server';
+    const line = `${what} ${verb} ${source}: ${path}`;
+    if (kind === 'ignored') log.debug(line);
+    else if (shown++ < MAX_CHANGE_LINES) log.info(line);
+    else hidden++;
+  }
+  if (hidden) log.info(`…and ${hidden} more file changes`);
+}
+
 async function checkRestart() {
   const sys = await api('/rest/system/status');
   if (startTime && sys.startTime !== startTime) {
@@ -76,10 +111,13 @@ async function pollOnce() {
 
   if (!events.length) return checkRestart();
 
+  const changes = [];
   for (const ev of events) {
     lastEventId = Math.max(lastEventId, ev.id);
     if (ev.data?.folder !== FOLDER) continue;
-    if (ev.type === 'StateChanged') {
+    if (ev.type === 'LocalChangeDetected' || ev.type === 'RemoteChangeDetected') {
+      changes.push(ev);
+    } else if (ev.type === 'StateChanged') {
       log.debug('Syncthing state', { from: ev.data.from, to: ev.data.to });
       watcher.emit('state', ev.data.to);
       if (ev.data.to === 'idle') watcher.emit('idle');
@@ -89,6 +127,7 @@ async function pollOnce() {
       if (errors.length) alert('folder-errors', 'Syncthing folder errors', `${errors.length} file(s) failed to sync, e.g. ${errors[0].path}: ${errors[0].error}`);
     }
   }
+  if (changes.length) await logChanges(changes);
 }
 
 export async function start() {
