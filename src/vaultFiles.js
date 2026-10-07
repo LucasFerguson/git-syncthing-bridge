@@ -4,6 +4,7 @@ import config from './config.js';
 import { log } from './logger.js';
 import { gitIgnores, pathKind } from './gitManager.js';
 import { getIgnores, setIgnores } from './syncthing.js';
+import { writeStatusNote } from './statusNote.js';
 
 // Vault files the bridge relies on. The rule is: add what is missing, never
 // overwrite. .gitignore and .stignore each get one marked block owned by the
@@ -64,6 +65,11 @@ export async function ensureVaultFiles() {
   if (!(await exists(join(v, '.nomedia')))) {
     await writeFile(join(v, '.nomedia'), '');
     log.info('Created .nomedia');
+  }
+
+  if (config.statusNote && !(await exists(join(v, config.statusNote)))) {
+    await writeStatusNote({ committedAt: null, lastPushAt: null });
+    log.info(`Created ${config.statusNote}`);
   }
 
   const gi = join(v, '.gitignore');

@@ -7,6 +7,7 @@ import { alert, resolve } from './notify.js';
 import * as gm from './gitManager.js';
 import * as st from './syncthing.js';
 import { checkVault } from './vaultFiles.js';
+import { writeStatusNote } from './statusNote.js';
 
 // One sync cycle, strictly serialized:
 //   Syncthing settled? → conflict copies? → commit → fetch → rebase (folder paused) → push
@@ -30,6 +31,17 @@ const state = {
   lastError: null,
 };
 const failingSince = {}; // op -> timestamp of first consecutive failure
+
+// Commit with the status note stamped first, so the note travels in the commit.
+async function commitWithStatus() {
+  return gm.commitLocal({
+    quietPath: config.statusNote,
+    beforeCommit: async () => writeStatusNote({
+      committedAt: new Date(),
+      lastPushAt: state.lastPushAt ?? await gm.remoteHeadDate(),
+    }),
+  });
+}
 
 let current = null;
 let rerun = false;
@@ -119,7 +131,7 @@ async function cycle(trigger) {
 
     // 3. Commit locally. This only writes inside .git, which Syncthing ignores.
     setPhase('committing');
-    const c = await gm.commitLocal();
+    const c = await commitWithStatus();
     if (c?.hash) state.lastCommitAt = new Date().toISOString();
     if (c?.excluded?.length) {
       alert('large-files', 'Large files kept out of git', `${c.excluded.join(', ')} exceeded ${config.maxFileMb} MB. They still sync to the phone but have no git history.`);
@@ -148,7 +160,7 @@ async function cycle(trigger) {
       setPhase('rebasing');
       try {
         await withFolderPaused(async () => {
-          await gm.commitLocal(); // anything that landed between step 3 and the pause
+          await commitWithStatus(); // anything that landed between step 3 and the pause
           await gm.rebaseOntoRemote();
         });
       } catch (err) {

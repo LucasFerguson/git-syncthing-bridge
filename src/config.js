@@ -54,6 +54,8 @@ const config = {
   // Keep .obsidian (plugins, themes, settings) out of Syncthing so the phone
   // and the vault repo each keep their own configuration.
   syncthingIgnoreObsidian: (process.env.SYNCTHING_IGNORE_OBSIDIAN ?? 'true') !== 'false',
+  // Note in the vault (relative path) with sync status and phone setup; empty disables it.
+  statusNote: process.env.STATUS_NOTE ?? 'Vault Sync Status.md',
 
   notifyUrl: process.env.NOTIFY_URL || '',
   notifyToken: process.env.NOTIFY_TOKEN || '',

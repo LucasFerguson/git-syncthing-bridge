@@ -125,6 +125,9 @@ export async function unpushedCommits() {
   });
 }
 
+// Commit date of the remote branch: a stand-in for "last push" after a restart.
+export const remoteHeadDate = () => tryRaw(['log', '-1', '--format=%cI', REMOTE_REF]);
+
 export async function behindCount() {
   if (!(await revParse(REMOTE_REF))) return 0;
   const range = (await revParse('HEAD')) ? `HEAD..${REMOTE_REF}` : REMOTE_REF;
@@ -179,8 +182,10 @@ async function excludeLargeFiles(pending) {
 }
 
 // Commit whatever is on disk. In daily mode the day's commit is amended until
-// it has been pushed, so history gets one commit per day.
-export async function commitLocal() {
+// it has been pushed, so history gets one commit per day. `beforeCommit` runs
+// just before staging, only when something other than `quietPath` changed —
+// used to stamp the status note without it ever triggering a commit itself.
+export async function commitLocal({ beforeCommit, quietPath } = {}) {
   await removeStaleLock();
   let pending = await changes();
   if (!pending.length) return null;
@@ -198,6 +203,7 @@ export async function commitLocal() {
     amend = subject.trim() === SUBJECT + day && !pushed;
   }
 
+  if (beforeCommit && pending.some(p => p.path !== quietPath)) await beforeCommit();
   await git('add', '-A');
 
   // Body lists every file changed by the commit (cumulative when amending).

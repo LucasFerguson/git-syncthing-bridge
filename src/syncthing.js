@@ -97,7 +97,7 @@ async function logChanges(changes) {
     const what = type === 'dir' ? 'Folder' : 'File';
     const source = ev.type === 'RemoteChangeDetected' ? `from ${await deviceName(modifiedBy)}` : 'on server';
     const line = `${what} ${verb} ${source}: ${path}`;
-    if (kind === 'ignored') log.debug(line);
+    if (kind === 'ignored' || path === config.statusNote) log.debug(line);
     else if (shown++ < MAX_CHANGE_LINES) log.info(line);
     else hidden++;
   }
