@@ -1,41 +1,74 @@
 import config from './config.js';
 import { log } from './logger.js';
-import { start as startWatcher, watcher } from './syncthingWatcher.js';
-import { commitAndPush, pull } from './gitManager.js';
-import { startDashboard } from './dashboard/server.js';
+import { sendNow } from './notify.js';
+import { ensureVaultFiles } from './vaultFiles.js';
+import * as st from './syncthing.js';
+import { requestCycle, startup, shutdown } from './sync.js';
+import { startDashboard, stopDashboard } from './dashboard/server.js';
 
 let debounceTimer = null;
 
-function scheduleCommit() {
+function scheduleCycle(trigger) {
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    log.info('Debounce elapsed — running commit & push');
-    await commitAndPush();
-  }, config.debounceMs);
-  log.info(`Commit scheduled in ${config.debounceMs / 1000}s`);
+  debounceTimer = setTimeout(() => requestCycle(trigger), config.debounceMs);
+  log.debug(`Cycle scheduled in ${config.debounceMs / 1000}s`, { trigger });
 }
 
-watcher.on('syncComplete', () => {
-  log.info('Sync complete signal received');
-  scheduleCommit();
-});
-
-// Periodic pull from remote
-async function schedulePull() {
-  while (true) {
-    await new Promise(r => setTimeout(r, config.pullIntervalMs));
-    log.info('Scheduled pull from remote');
-    await pull();
-  }
+// Fatal errors: tell the user, then exit and let systemd restart us.
+async function die(kind, err) {
+  log.error(`${kind} — exiting`, { err: err?.stack || String(err) });
+  await Promise.race([
+    sendNow('Bridge crashed', `${kind}: ${err?.message || err}\nsystemd will restart it.`, 'high'),
+    new Promise(r => setTimeout(r, 5_000)),
+  ]);
+  process.exit(1);
 }
+process.on('uncaughtException', err => die('Uncaught exception', err));
+process.on('unhandledRejection', err => die('Unhandled rejection', err));
+
+async function stop(signal) {
+  log.info(`${signal} received — shutting down`);
+  clearTimeout(debounceTimer);
+  st.stop();
+  await shutdown();
+  await stopDashboard();
+  process.exit(0);
+}
+process.on('SIGTERM', () => stop('SIGTERM'));
+process.on('SIGINT', () => stop('SIGINT'));
 
 log.info('Git-Syncthing Bridge starting', {
   vault: config.vaultPath,
-  dashboardPort: config.dashboardPort,
-  debounceMs: config.debounceMs,
-  pullIntervalMs: config.pullIntervalMs,
+  folder: config.syncthingFolderId,
+  commitMode: config.commitMode,
+  conflictPolicy: config.conflictPolicy,
+  notifications: config.notifyUrl ? 'on' : 'off (NOTIFY_URL unset)',
 });
 
 startDashboard();
-schedulePull();
-startWatcher();
+
+// Syncthing reachable and folder settled? → cycle. Missed events are covered
+// by 'resync' (reconnect/restart) and the periodic timer below.
+st.watcher.on('idle', () => scheduleCycle('syncthing-idle'));
+st.watcher.on('resync', () => scheduleCycle('syncthing-resync'));
+setInterval(() => requestCycle('timer'), config.pullIntervalMs);
+
+try {
+  await ensureVaultFiles();
+  // Syncthing may still be starting after a reboot; startup() needs it to clear
+  // a stale pause, so retry for a few minutes before giving up.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await startup();
+      break;
+    } catch (err) {
+      if (attempt >= 20) throw err;
+      log.warn('Startup reconciliation failed — retrying in 15s', { err: err.message });
+      await new Promise(r => setTimeout(r, 15_000));
+    }
+  }
+} catch (err) {
+  await die('Startup failed', err);
+}
+
+st.start();

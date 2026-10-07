@@ -5,7 +5,7 @@
 | Service | Runs As | Config |
 |---|---|---|
 | Syncthing | root | `/root/.local/state/syncthing/config.xml` |
-| Git-Syncthing Bridge | root | `/opt/git-syncthing-bridge/.env` |
+| Git-Syncthing Bridge | root (systemd `git-syncthing-bridge`) | `/opt/git-syncthing-bridge/.env` |
 
 ## Key Directories
 
@@ -25,9 +25,9 @@
 
 ## Bridge Dashboard
 
-- Runs on port 3000 (configurable via `DASHBOARD_PORT` in `.env`)
-- URL: http://<server-ip>:3000
-- Start: `cd /opt/git-syncthing-bridge && npm start`
+- URL: http://syncthing.netbird.cloud:3000 (NetBird only; basic auth, user `admin`, password in `.env`)
+- Service: `systemctl status git-syncthing-bridge`, logs: `journalctl -u git-syncthing-bridge -f`
+- Test vault: `/opt/vault-test/` (Syncthing folder `bridge-test`, local bare remote) — temporary
 
 ## Vault Git Flow
 

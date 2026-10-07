@@ -1,0 +1,62 @@
+import { readFile, writeFile, access } from 'fs/promises';
+import { join } from 'path';
+import config from './config.js';
+import { log } from './logger.js';
+
+// Files the bridge keeps in shape inside the vault. Each is rewritten only when
+// its content is wrong, so this is safe to run on every start.
+
+const BEGIN = '# >>> git-syncthing-bridge (managed block — edits inside it are overwritten)';
+const END = '# <<< git-syncthing-bridge';
+
+function gitignoreBlock() {
+  return [
+    BEGIN,
+    '# Syncthing internals and conflict copies (conflicts are reported by the bridge, never committed)',
+    '.stfolder', '.stfolder/', '.stignore', '.stversions/', '*.sync-conflict-*', '.syncthing.*.tmp', '~syncthing~*.tmp',
+    '# Obsidian per-device UI state and trash',
+    '.obsidian/workspace.json', '.obsidian/workspace-mobile.json', '.trash/',
+    END,
+  ].join('\n');
+}
+
+const exists = p => access(p).then(() => true, () => false);
+
+async function ensureManagedBlock(path, block) {
+  const current = (await exists(path)) ? await readFile(path, 'utf8') : '';
+  const re = new RegExp(`${BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${END}`);
+  const next = re.test(current)
+    ? current.replace(re, block)
+    : (current.trimEnd() ? current.trimEnd() + '\n\n' : '') + block + '\n';
+  if (next !== current) {
+    await writeFile(path, next);
+    log.info('Updated managed file', { file: path.replace(config.vaultPath + '/', '') });
+  }
+}
+
+export async function ensureVaultFiles() {
+  const v = config.vaultPath;
+
+  // Empty .nomedia keeps Android's media scanner (gallery, Google Photos backup)
+  // out of the vault. It is a normal file, so Syncthing carries it to the phone.
+  if (!(await exists(join(v, '.nomedia')))) {
+    await writeFile(join(v, '.nomedia'), '');
+    log.info('Created .nomedia');
+  }
+
+  await ensureManagedBlock(join(v, '.gitignore'), gitignoreBlock());
+
+  // .stignore is local to this server and never synced. It must keep .git out
+  // of Syncthing; conflict copies must NOT be listed, or phone-side conflicts
+  // would never reach the server and the bridge could not see them.
+  const stignore = join(v, '.stignore');
+  const st = (await exists(stignore)) ? await readFile(stignore, 'utf8') : '';
+  const lines = st.split('\n').map(l => l.trim());
+  if (lines.some(l => l.includes('sync-conflict'))) {
+    log.warn('.stignore lists sync-conflict files — phone-side conflicts will be hidden from the bridge');
+  }
+  if (!lines.includes('.git') && !lines.includes('/.git')) {
+    await writeFile(stignore, '// Server-local Syncthing ignores (not synced). Keep .git out of the phone.\n/.git\n' + st);
+    log.info('Added /.git to .stignore');
+  }
+}

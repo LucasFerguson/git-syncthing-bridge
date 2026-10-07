@@ -1,0 +1,36 @@
+[Unit]
+Description=Git-Syncthing Bridge (Obsidian vault -> git)
+Documentation=file:///opt/git-syncthing-bridge/README.md
+After=network-online.target syncthing@root.service netbird.service
+Wants=network-online.target syncthing@root.service
+# Never give up restarting; a config error (exit 78) stops it instead.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/git-syncthing-bridge
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=15
+RestartPreventExitStatus=78
+# Lets an in-flight git cycle finish (the app waits up to 45s).
+TimeoutStopSec=60
+Environment=NODE_ENV=production
+
+# Hardening: runs as root (like Syncthing) but may only write to the vault.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/vault
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -38,7 +38,12 @@
     .log-line.WARN  .lvl { color: var(--yellow); }
     .log-line.ERROR .lvl { color: var(--red); }
     .log-line.DEBUG .lvl { color: var(--muted); }
-    .conflicts { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; margin-top: 8px; display: none; }
+    .conflicts { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; display: none; }
+    .conflicts + .conflicts { margin-top: 8px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+    .kv dt { color: var(--muted); }
+    .badge.unreachable, .badge.paused { background: #450a0a; color: var(--red); }
+    .log-line span:last-child { overflow-wrap: anywhere; }
     .conflicts h3 { color: var(--red); font-size: 13px; margin-bottom: 6px; }
     .conflicts ul { padding-left: 16px; font-size: 12px; color: #fca5a5; }
     #commits ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
@@ -50,18 +55,25 @@
 <body>
   <header>
     <h1>Git-Syncthing Bridge</h1>
-    <span id="sync-badge" class="badge idle">idle</span>
+    <span id="sync-badge" class="badge">syncthing: …</span>
+    <span id="bridge-badge" class="badge idle">…</span>
     <span id="conn-badge" class="badge error" style="margin-left:auto">disconnected</span>
   </header>
 
   <div class="grid">
     <div class="card">
-      <h2>Last Commit</h2>
-      <div class="stat" id="last-hash">—</div>
-      <div class="sub" id="last-ts">—</div>
+      <h2>Git</h2>
+      <dl class="kv">
+        <dt>Mode</dt><dd id="mode">—</dd>
+        <dt>Uncommitted</dt><dd id="uncommitted">—</dd>
+        <dt>Unpushed commits</dt><dd id="unpushed">—</dd>
+        <dt>Behind remote</dt><dd id="behind">—</dd>
+        <dt>Last fetch</dt><dd id="last-fetch">—</dd>
+        <dt>Last push</dt><dd id="last-push">—</dd>
+      </dl>
       <div class="actions">
-        <button class="btn-primary" id="btn-commit">Commit &amp; Push</button>
-        <button class="btn-secondary" id="btn-pull">Pull Now</button>
+        <button class="btn-primary" id="btn-sync">Sync now</button>
+        <button class="btn-secondary" id="btn-push" title="Also pushes today's in-progress daily commit">Push now</button>
       </div>
     </div>
 
@@ -70,11 +82,10 @@
       <ul id="commit-list"><li style="color:var(--muted)">Loading…</li></ul>
     </div>
 
-    <div class="card" style="grid-column:1/-1">
-      <div class="conflicts" id="conflict-box">
-        <h3>⚠ Sync Conflicts Detected</h3>
-        <ul id="conflict-list"></ul>
-      </div>
+    <div class="card" id="problems" style="grid-column:1/-1;display:none">
+      <div class="conflicts" id="alert-box"><h3>⚠ Active alerts</h3><ul id="alert-list"></ul></div>
+      <div class="conflicts" id="conflict-box"><h3>⚠ Sync conflict copies</h3><ul id="conflict-list"></ul></div>
+      <div class="conflicts" id="merge-box"><h3>⚠ Diverged from remote (would conflict)</h3><ul id="merge-list"></ul></div>
     </div>
 
     <div class="card" id="log-panel" style="grid-column:1/-1">
@@ -85,87 +96,83 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
+    const $ = id => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const when = iso => iso ? new Date(iso).toLocaleString() : 'never';
     const socket = io();
-    const logBox = document.getElementById('log-box');
-    const syncBadge = document.getElementById('sync-badge');
-    const connBadge = document.getElementById('conn-badge');
-    const conflictBox = document.getElementById('conflict-box');
-    const conflictList = document.getElementById('conflict-list');
-    const commitList = document.getElementById('commit-list');
-    const lastHash = document.getElementById('last-hash');
-    const lastTs = document.getElementById('last-ts');
-    const btnCommit = document.getElementById('btn-commit');
-    const btnPull = document.getElementById('btn-pull');
 
-    socket.on('connect', () => {
-      connBadge.textContent = 'connected';
-      connBadge.className = 'badge idle';
-    });
-    socket.on('disconnect', () => {
-      connBadge.textContent = 'disconnected';
-      connBadge.className = 'badge error';
-    });
+    socket.on('connect', () => { $('conn-badge').textContent = 'connected'; $('conn-badge').className = 'badge idle'; loadStatus(); });
+    socket.on('disconnect', () => { $('conn-badge').textContent = 'disconnected'; $('conn-badge').className = 'badge error'; });
 
     function addLog(entry) {
-      const line = document.createElement('div');
-      line.className = `log-line ${entry.level}`;
-      const ts = entry.timestamp.replace('T', ' ').replace('Z', '').substring(0, 19);
-      line.innerHTML = `<span class="ts">${ts}</span><span class="lvl">${entry.level}</span><span>${entry.message}</span>`;
-      logBox.appendChild(line);
-      logBox.scrollTop = logBox.scrollHeight;
-      if (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
+      const line = el('div', `log-line ${entry.level}`);
+      line.append(
+        el('span', 'ts', new Date(entry.timestamp).toLocaleString()),
+        el('span', 'lvl', entry.level),
+        el('span', null, entry.message + (entry.data && Object.keys(entry.data).length ? ' ' + JSON.stringify(entry.data) : '')),
+      );
+      const box = $('log-box');
+      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 20;
+      box.appendChild(line);
+      if (box.children.length > 300) box.removeChild(box.firstChild);
+      if (atBottom) box.scrollTop = box.scrollHeight;
     }
-
     socket.on('log', addLog);
-    socket.on('logHistory', entries => { logBox.innerHTML = ''; entries.forEach(addLog); });
+    socket.on('logHistory', entries => { $('log-box').replaceChildren(); entries.forEach(addLog); });
 
     socket.on('syncState', state => {
-      syncBadge.textContent = state;
-      syncBadge.className = `badge ${state}`;
+      $('sync-badge').textContent = `syncthing: ${state}`;
+      $('sync-badge').className = `badge ${/^[a-z-]+$/.test(state) ? state : ''}`;
     });
 
-    socket.on('commit', ({ hash, files, timestamp }) => {
-      lastHash.textContent = hash.substring(0, 7);
-      lastTs.textContent = `${files} file(s) · ${new Date(timestamp).toLocaleString()}`;
-      loadStatus();
+    let refresh;
+    socket.on('bridgeState', s => {
+      $('bridge-badge').textContent = `bridge: ${s.phase}`;
+      $('bridge-badge').className = `badge ${s.phase === 'idle' ? 'idle' : 'syncing'}`;
+      clearTimeout(refresh);
+      if (s.phase === 'idle') refresh = setTimeout(loadStatus, 300);
     });
 
-    socket.on('conflict', files => {
-      conflictBox.style.display = 'block';
-      conflictList.innerHTML = files.map(f => `<li>${f}</li>`).join('');
-    });
-
-    socket.on('syncComplete', () => {
-      conflictBox.style.display = 'none';
-    });
+    function fillList(boxId, listId, items) {
+      $(listId).replaceChildren(...items.map(t => el('li', null, t)));
+      $(boxId).style.display = items.length ? 'block' : 'none';
+      return items.length > 0;
+    }
 
     async function loadStatus() {
       const res = await fetch('/api/status');
-      const { git } = await res.json();
+      if (!res.ok) return;
+      const { git, bridge, alerts, commitMode } = await res.json();
       if (!git) return;
+      $('mode').textContent = commitMode === 'daily' ? 'one commit per day (pushed after midnight)' : 'commit + push on every change';
+      $('uncommitted').textContent = `${git.uncommitted} file(s)`;
+      $('unpushed').textContent = git.unpushed;
+      $('behind').textContent = git.behind;
+      $('last-fetch').textContent = when(bridge.lastFetchAt);
+      $('last-push').textContent = when(bridge.lastPushAt);
+
       const commits = git.recentCommits || [];
-      commitList.innerHTML = commits.map(c =>
-        `<li><div class="msg">${c.message}</div><div class="hash">${c.hash.substring(0,7)} · ${new Date(c.date).toLocaleString()}</div></li>`
-      ).join('') || '<li style="color:var(--muted)">No commits yet</li>';
-      if (commits[0]) {
-        lastHash.textContent = commits[0].hash.substring(0, 7);
-        lastTs.textContent = new Date(commits[0].date).toLocaleString();
-      }
+      $('commit-list').replaceChildren(...(commits.length ? commits.map(c => {
+        const li = el('li');
+        li.append(el('div', 'msg', c.message), el('div', 'hash', `${c.hash.substring(0, 7)} · ${when(c.date)}`));
+        return li;
+      }) : [el('li', null, 'No commits yet')]));
+
+      const any = [
+        fillList('alert-box', 'alert-list', alerts.map(a => `${a.title} (since ${when(a.since)})`)),
+        fillList('conflict-box', 'conflict-list', bridge.conflicts),
+        fillList('merge-box', 'merge-list', bridge.mergeConflicts),
+      ].some(Boolean);
+      $('problems').style.display = any ? 'block' : 'none';
     }
 
-    btnCommit.addEventListener('click', async () => {
-      btnCommit.disabled = true;
-      await fetch('/api/commit', { method: 'POST' });
-      btnCommit.disabled = false;
-    });
-
-    btnPull.addEventListener('click', async () => {
-      btnPull.disabled = true;
-      await fetch('/api/pull', { method: 'POST' });
-      btnPull.disabled = false;
-    });
-
-    loadStatus();
+    async function post(path, btn) {
+      btn.disabled = true;
+      try { await fetch(path, { method: 'POST', headers: { 'X-Bridge': '1' } }); }
+      finally { setTimeout(() => { btn.disabled = false; }, 1500); }
+    }
+    $('btn-sync').addEventListener('click', e => post('/api/sync', e.currentTarget));
+    $('btn-push').addEventListener('click', e => post('/api/push', e.currentTarget));
   </script>
 </body>
 </html>
