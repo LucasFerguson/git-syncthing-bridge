@@ -38,6 +38,7 @@ process.on('SIGTERM', () => stop('SIGTERM'));
 process.on('SIGINT', () => stop('SIGINT'));
 
 log.info('Git-Syncthing Bridge starting', {
+  instance: config.instanceName,
   vault: config.vaultPath,
   folder: config.syncthingFolderId,
   commitMode: config.commitMode,

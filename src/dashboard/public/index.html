@@ -71,7 +71,7 @@
 </head>
 <body>
   <header>
-    <h1>Git-Syncthing Bridge</h1>
+    <h1 id="title">Git-Syncthing Bridge</h1>
     <span id="sync-badge" class="badge">syncthing: …</span>
     <span id="bridge-badge" class="badge idle">…</span>
     <span id="conn-badge" class="badge error" style="margin-left:auto">disconnected</span>
@@ -174,7 +174,9 @@
     async function loadStatus() {
       const res = await fetch('/api/status');
       if (!res.ok) return;
-      const { git, bridge, alerts, commitMode, checks } = await res.json();
+      const { git, bridge, alerts, commitMode, checks, instance } = await res.json();
+      $('title').textContent = `Git-Syncthing Bridge · ${instance}`;
+      document.title = `${instance} · Git-Syncthing Bridge`;
       if (checks?.length) {
         $('checks').replaceChildren(...checks.map(c => {
           const cls = c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'pending';

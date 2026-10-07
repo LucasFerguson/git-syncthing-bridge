@@ -1,5 +1,6 @@
+# One instance per vault: git-syncthing-bridge@<name> reads instances/<name>.env
 [Unit]
-Description=Git-Syncthing Bridge (Obsidian vault -> git)
+Description=Git-Syncthing Bridge (%i)
 Documentation=file:///opt/git-syncthing-bridge/README.md
 After=network-online.target syncthing@root.service netbird.service
 Wants=network-online.target syncthing@root.service
@@ -9,18 +10,19 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=/opt/git-syncthing-bridge
+Environment=BRIDGE_ENV=/opt/git-syncthing-bridge/instances/%i.env
+Environment=NODE_ENV=production
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 RestartSec=15
 RestartPreventExitStatus=78
 # Lets an in-flight git cycle finish (the app waits up to 45s).
 TimeoutStopSec=60
-Environment=NODE_ENV=production
 
-# Hardening: runs as root (like Syncthing) but may only write to the vault.
+# Hardening: runs as root (like Syncthing) but may only write to vault dirs.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/vault
+ReadWritePaths=/opt/vault /opt/vault-test
 ProtectHome=read-only
 PrivateTmp=true
 PrivateDevices=true

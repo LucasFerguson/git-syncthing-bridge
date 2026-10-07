@@ -47,7 +47,7 @@ never rewritten. "Push now" on the dashboard pushes today's commit early.
 - git: never prompts, never trusts unknown SSH host keys, times out.
 - Crashes exit non-zero and systemd restarts the service. A config error exits
   78 and is not retried.
-- Logs go to journald: `journalctl -u git-syncthing-bridge -f`.
+- Logs go to journald: `journalctl -u git-syncthing-bridge@<name> -f`.
 - Alerts (`NOTIFY_URL`, ntfy-compatible): sent when a problem starts, once a day
   while it lasts, and when it resolves. Remote outages alert only after an hour.
 
@@ -59,17 +59,24 @@ Bind it to the NetBird address or `127.0.0.1`, never `0.0.0.0`.
 
 ## Setup
 
+Each vault is its own instance: a Syncthing folder, a clone under
+`/opt/vault/<name>`, settings in `instances/<name>.env`, its own dashboard port,
+and a `git-syncthing-bridge@<name>` systemd service.
+
 ```sh
 apt install nodejs git                  # Node >= 20.3
 cd /opt/git-syncthing-bridge && npm ci --omit=dev
-cp .env.example .env && chmod 600 .env  # set DASHBOARD_PASSWORD, NOTIFY_URL
-scripts/init-vault.sh <git-remote-url>  # clone, write .stignore, add Syncthing folder
-cp deploy/git-syncthing-bridge.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now git-syncthing-bridge
+cp deploy/git-syncthing-bridge@.service /etc/systemd/system/ && systemctl daemon-reload
+
+# per vault (refuses if the disk cannot hold it with headroom)
+scripts/init-vault.sh <name> <git-remote-url> <dashboard-port>
+systemctl enable --now git-syncthing-bridge@<name>
+journalctl -fu git-syncthing-bridge@<name>
 ```
 
 The remote's SSH host key must already be in `~/.ssh/known_hosts`. Then share
-the folder with the phone in the Syncthing GUI.
+the folder with the phone in the Syncthing GUI and set the phone's ignore
+patterns from `Vault Sync Status.md`.
 
 ## Tests
 

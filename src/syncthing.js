@@ -91,6 +91,8 @@ async function logChanges(changes) {
   let shown = 0;
   let hidden = 0;
   for (const ev of changes) {
+    // Past the limit, just count: no git lookups for a 7,000-file initial scan.
+    if (shown >= MAX_CHANGE_LINES) { hidden++; continue; }
     const { action, type, path, modifiedBy } = ev.data;
     const kind = action === 'deleted' ? null : await pathKind(path).catch(() => null);
     const verb = action === 'deleted' ? 'deleted' : kind === 'new' ? 'created' : 'edited';
@@ -98,8 +100,7 @@ async function logChanges(changes) {
     const source = ev.type === 'RemoteChangeDetected' ? `from ${await deviceName(modifiedBy)}` : 'on server';
     const line = `${what} ${verb} ${source}: ${path}`;
     if (kind === 'ignored' || path === config.statusNote) log.debug(line);
-    else if (shown++ < MAX_CHANGE_LINES) log.info(line);
-    else hidden++;
+    else { shown++; log.info(line); }
   }
   if (hidden) log.info(`…and ${hidden} more file changes`);
 }

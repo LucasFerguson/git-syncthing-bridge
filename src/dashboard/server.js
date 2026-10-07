@@ -78,6 +78,7 @@ app.get('/api/status', async (_req, res) => {
   try {
     res.json({
       ok: true,
+      instance: config.instanceName,
       syncthing: syncthingState,
       bridge: getState(),
       alerts: activeAlerts(),

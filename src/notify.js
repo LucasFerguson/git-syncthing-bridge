@@ -12,7 +12,7 @@ const active = new Map(); // key -> { title, since, lastSent }
 async function send(title, message, priority = 'default') {
   if (!config.notifyUrl) return;
   try {
-    const headers = { Title: `Vault: ${title}`, Priority: priority, 'Content-Type': 'text/plain' };
+    const headers = { Title: `${config.instanceName}: ${title}`, Priority: priority, 'Content-Type': 'text/plain' };
     if (config.notifyToken) headers.Authorization = `Bearer ${config.notifyToken}`;
     const res = await fetch(config.notifyUrl, {
       method: 'POST', headers, body: message, signal: AbortSignal.timeout(15_000),

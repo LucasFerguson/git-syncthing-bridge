@@ -1,7 +1,11 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+
+// One process per vault. BRIDGE_ENV picks the instance's settings file
+// (the systemd template sets it to instances/<name>.env); default ./.env.
+dotenv.config({ path: process.env.BRIDGE_ENV || '.env', quiet: true });
 
 // Exit code for configuration errors. The systemd unit lists it in
 // RestartPreventExitStatus so a bad config fails once instead of crash-looping.
@@ -31,6 +35,8 @@ function syncthingApiKey() {
 }
 
 const config = {
+  // Shown on the dashboard and in logs/alerts to tell instances apart.
+  instanceName: process.env.INSTANCE_NAME || 'vault',
   vaultPath: process.env.VAULT_PATH || '/opt/vault/obsidian-vault',
   gitBranch: process.env.GIT_BRANCH || 'main',
   syncthingApiUrl: (process.env.SYNCTHING_API_URL || 'http://127.0.0.1:8384').replace(/\/$/, ''),
@@ -66,6 +72,8 @@ const config = {
   dashboardPassword: process.env.DASHBOARD_PASSWORD || '',
 
   logLevel: process.env.LOG_LEVEL || 'info',
+  // Alert when the vault's filesystem has less free space than this.
+  diskMinFreeGb: Number(process.env.DISK_MIN_FREE_GB || 2),
 };
 
 const missing = [

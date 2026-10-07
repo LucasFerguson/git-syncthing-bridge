@@ -1,4 +1,4 @@
-import { readFile, writeFile, access, readdir } from 'fs/promises';
+import { readFile, writeFile, access, readdir, statfs } from 'fs/promises';
 import { join } from 'path';
 import config from './config.js';
 import { log } from './logger.js';
@@ -147,6 +147,13 @@ export async function checkVault() {
   }
   const stNomedia = stHides(pats, '.nomedia');
   add('st-nomedia', 'Syncthing syncs .nomedia to the phone', !stNomedia, stNomedia ? 'A .stignore pattern hides .nomedia.' : '');
+
+  // Disk: a large vault stores every photo twice (history + working copy), and
+  // git's occasional repack needs temporary room on top.
+  const fs = await statfs(v);
+  const freeGb = (fs.bavail * fs.bsize) / 1024 ** 3;
+  add('disk', `At least ${config.diskMinFreeGb} GB free on the vault disk`, freeGb >= config.diskMinFreeGb,
+    `${freeGb.toFixed(1)} GB free`);
 
   // Log only when the result changes, so a persistent failure is not spammed.
   const summary = c => `${c.id}:${c.ok}`;
