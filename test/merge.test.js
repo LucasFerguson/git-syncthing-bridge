@@ -78,11 +78,18 @@ test('commit message names devices and counts changes', async () => {
   assert.equal(sources.size, 0, 'committed paths are taken out of the sources map');
 });
 
+test('files with no change event are tagged by the lookup', async () => {
+  write(VAULT, 'missed.md', 'changed while the bridge was down\n');
+  await gm.commitLocal({ lookupSource: async p => (p === 'missed.md' ? 'S24Ultra' : undefined) });
+  assert.match(headMessage(), /^A\tmissed\.md\t\[S24Ultra\]$/m);
+  assert.match(headMessage(), /^A\tphone\.md\t\[S24Ultra\]$/m, 'earlier tag kept on amend');
+});
+
 test('daily amend keeps earlier device tags and adds new ones', async () => {
   write(VAULT, 'server.md', 'x\n');
   await gm.commitLocal({ sources: new Map([['server.md', 'server']]) });
   const msg = headMessage();
-  assert.match(msg.split('\n')[0], /\(S24Ultra, server: 2 created, 1 edited\)$/);
+  assert.match(msg.split('\n')[0], /\(S24Ultra, server: 3 created, 1 edited\)$/);
   assert.match(msg, /^A\tphone\.md\t\[S24Ultra\]$/m);
   assert.match(msg, /^A\tserver\.md\t\[server\]$/m);
   assert.equal(sh(VAULT, 'rev-list', '--count', 'origin/main..HEAD'), '1', 'still one commit for today');

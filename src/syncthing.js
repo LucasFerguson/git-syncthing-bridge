@@ -72,11 +72,30 @@ export async function setIgnores(lines) {
   await api(`/rest/db/ignores?folder=${encodeURIComponent(FOLDER)}`, { method: 'POST', body: { ignore: lines } });
 }
 
+// Who last changed a file, from Syncthing's database (metadata only). The
+// fallback for commit messages when no change event was seen, e.g. the file
+// changed while the bridge was down. Works for deleted files too.
+export async function lastChangedBy(path) {
+  try {
+    const info = await api(`/rest/db/file?folder=${encodeURIComponent(FOLDER)}&file=${encodeURIComponent(path)}`);
+    const id = info?.global?.modifiedBy;
+    return id ? await deviceName(id) : undefined;
+  } catch {
+    return undefined; // not in Syncthing's index, e.g. ignored
+  }
+}
+
 // Ask Syncthing to rescan now (after git changed files) instead of waiting for the watcher.
 export const rescan = () => api(`/rest/db/scan?folder=${encodeURIComponent(FOLDER)}`, { method: 'POST' });
 
+let myShortId = null; // this server's device, labelled "server"
+
 // RemoteChangeDetected names the device by its short ID (first 7 chars).
 async function deviceName(shortId) {
+  if (!myShortId) {
+    try { myShortId = (await api('/rest/system/status')).myID.slice(0, 7); } catch { /* retry next time */ }
+  }
+  if (shortId === myShortId) return 'server';
   const find = () => [...deviceNames].find(([id]) => id.startsWith(shortId))?.[1];
   if (!find()) {
     try {

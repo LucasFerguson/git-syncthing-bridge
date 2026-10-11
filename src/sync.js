@@ -39,6 +39,7 @@ async function commitWithStatus() {
   return gm.commitLocal({
     quietPath: config.statusNote,
     sources: st.changeSources,
+    lookupSource: st.lastChangedBy,
     beforeCommit: async () => writeStatusNote({
       committedAt: new Date(),
       lastPushAt: state.lastPushAt ?? await gm.remoteHeadDate(),

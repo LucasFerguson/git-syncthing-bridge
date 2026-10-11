@@ -248,8 +248,8 @@ const isDaySubject = (subject, day) => subject === SUBJECT + day || subject.star
 // just before staging, only when something other than `quietPath` changed —
 // used to stamp the status note without it ever triggering a commit itself.
 // `sources` maps path -> device name (from Syncthing events); committed paths
-// are removed from it.
-export async function commitLocal({ beforeCommit, quietPath, sources = new Map() } = {}) {
+// are removed from it. `lookupSource(path)` answers for files with no event.
+export async function commitLocal({ beforeCommit, quietPath, sources = new Map(), lookupSource } = {}) {
   await removeStaleLock();
   let pending = await changes();
   if (!pending.length) return null;
@@ -281,9 +281,11 @@ export async function commitLocal({ beforeCommit, quietPath, sources = new Map()
   }
   const base = amend ? (await revParse('HEAD~1')) ?? EMPTY_TREE : head ?? EMPTY_TREE;
   const files = (await git('diff', '--cached', '--name-status', base)).split('\n').map(parseFileLine).filter(Boolean);
-  for (const f of files) {
+  for (const [i, f] of files.entries()) {
     const path = f.paths.at(-1);
-    f.device = sources.get(path) ?? sources.get(f.paths[0]) ?? prevDevices.get(path);
+    f.device = sources.get(path) ?? sources.get(f.paths[0]) ?? prevDevices.get(path)
+      ?? (path === quietPath ? 'server' : undefined) // the bridge writes the status note itself
+      ?? (lookupSource && i < 200 ? await lookupSource(path) : undefined);
   }
   const prefix = config.commitMode === 'daily'
     ? SUBJECT + day
