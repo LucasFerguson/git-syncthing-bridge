@@ -41,11 +41,9 @@ check "file over MAX_FILE_MB excluded" "! remote_has big-video.mp4 && grep -q bi
 # Real divergence: same line edited on both sides
 (cd $SEED && git pull -q && echo "desktop version" > Clash.md && git add -A && git commit -qm clash && git push -q)
 echo "phone version" > $V/Clash.md; sleep 45
-check "divergence alerted, not silently merged" "grep -q 'ALERT Vault diverged' $LOG && ! grep -q 'desktop version' $V/Clash.md"
-check "local edit kept in a local commit" "git -C $V show HEAD:Clash.md | grep -q 'phone version'"
+check "divergence auto-merged, both versions kept" "grep -q 'desktop version' $V/Clash.md && grep -q 'phone version' $V/Clash.md"
+check "merge pushed and noted in the commit" "git -C $R log -1 --format=%B main | grep -q 'Merged onto remote'"
 stopb
-# resolve divergence the way a human would: take local on top of remote
-git -C $V fetch -q && git -C $V -c user.name=t -c user.email=t rebase -X theirs -q origin/main >/dev/null 2>&1 || git -C $V rebase --abort
 
 echo "== crash recovery"
 touch -d '1 hour ago' $V/.git/index.lock 2>/dev/null || touch $V/.git/index.lock
@@ -58,7 +56,7 @@ start daily
 echo "d1" > $V/Daily.md; sleep 12
 first=$(git -C $V rev-parse HEAD)
 echo "d2" >> $V/Daily.md; sleep 12
-check "second edit amended into today's commit" "[ \"\$(git -C $V log -1 --format=%s)\" = \"vault: \$(date +%F)\" ] && [ \$(git -C $V log --format=%s | grep -c \"vault: \$(date +%F)\") -ge 1 ] && git -C $V show HEAD --stat | grep -q Daily.md"
+check "second edit amended into today's commit" "git -C $V log -1 --format=%s | grep -q \"^vault: \$(date +%F)\" && [ \$(git -C $V log --format=%s \$(git -C $V rev-parse origin/main)..HEAD | wc -l) -eq 1 ] && git -C $V show HEAD --stat | grep -q Daily.md"
 check "today's commit held back (not pushed)" "! remote_has Daily.md"
 stopb
 

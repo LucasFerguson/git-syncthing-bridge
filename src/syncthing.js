@@ -27,6 +27,8 @@ let startTime = null;       // Syncthing's own start time; a change means it res
 let downSince = null;
 let pollAbort = null;
 let deviceNames = new Map(); // full device ID -> name, for "changed by <phone>"
+// Vault path -> who changed it last ("S24Ultra", "server"), for commit messages.
+export const changeSources = new Map();
 
 async function api(path, { method = 'GET', body, timeoutMs = 15_000, signal } = {}) {
   const signals = [AbortSignal.timeout(timeoutMs)];
@@ -82,7 +84,8 @@ async function deviceName(shortId) {
       deviceNames = new Map(devices.map(d => [d.deviceID, d.name || d.deviceID.slice(0, 7)]));
     } catch { /* fall back to the short ID */ }
   }
-  return find() ?? shortId;
+  const name = find() ?? shortId;
+  return config.deviceNames.get(name) ?? name;
 }
 
 // One log line per changed file. Git-ignored paths (Obsidian's workspace
@@ -91,13 +94,15 @@ async function logChanges(changes) {
   let shown = 0;
   let hidden = 0;
   for (const ev of changes) {
+    const { action, type, path, modifiedBy } = ev.data;
+    const device = ev.type === 'RemoteChangeDetected' ? await deviceName(modifiedBy) : 'server';
+    if (type !== 'dir') changeSources.set(path, device);
     // Past the limit, just count: no git lookups for a 7,000-file initial scan.
     if (shown >= MAX_CHANGE_LINES) { hidden++; continue; }
-    const { action, type, path, modifiedBy } = ev.data;
     const kind = action === 'deleted' ? null : await pathKind(path).catch(() => null);
     const verb = action === 'deleted' ? 'deleted' : kind === 'new' ? 'created' : 'edited';
     const what = type === 'dir' ? 'Folder' : 'File';
-    const source = ev.type === 'RemoteChangeDetected' ? `from ${await deviceName(modifiedBy)}` : 'on server';
+    const source = device === 'server' ? 'on server' : `from ${device}`;
     const line = `${what} ${verb} ${source}: ${path}`;
     if (kind === 'ignored' || path === config.statusNote) log.debug(line);
     else { shown++; log.info(line); }

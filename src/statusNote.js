@@ -64,6 +64,12 @@ must reach the server so it can warn you about them.
 - A file named \`… .sync-conflict-<date>-<id>.md\` means the same note was changed
   on two devices at once. Merge what you need into the original note and delete the
   conflict copy. They are never committed to git.
+- Edited the same note here and on another device (e.g. a desktop) before they
+  synced? The server merges them without stopping: lines from both versions are
+  kept, the remote's first, so you may see a paragraph twice. Tidy it up by hand.
+- A file named \`… (remote conflict <date> <time>).<ext>\` is the other device's
+  version of a file that could not be merged (a photo, a settings file). The
+  original name holds this vault's version. Keep whichever you want.
 - Dashboard (on NetBird): http://syncthing.netbird.cloud:${config.dashboardPort}
 `;
 }

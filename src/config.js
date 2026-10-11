@@ -71,6 +71,10 @@ const config = {
   dashboardUser: process.env.DASHBOARD_USER || 'admin',
   dashboardPassword: process.env.DASHBOARD_PASSWORD || '',
 
+  // Friendlier names for Syncthing devices in logs and commit messages:
+  // "SM-S928U=S24Ultra,DESKTOP-1=Desktop" (Syncthing device name = label).
+  deviceNames: new Map((process.env.DEVICE_NAMES || '').split(',').map(s => s.split('=').map(x => x.trim())).filter(([k, v]) => k && v)),
+
   logLevel: process.env.LOG_LEVEL || 'info',
   // Alert when the vault's filesystem has less free space than this.
   diskMinFreeGb: Number(process.env.DISK_MIN_FREE_GB || 2),

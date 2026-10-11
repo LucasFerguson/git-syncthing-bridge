@@ -107,7 +107,7 @@
     <div class="card" id="problems" style="grid-column:1/-1;display:none">
       <div class="conflicts" id="alert-box"><h3>⚠ Active alerts</h3><ul id="alert-list"></ul></div>
       <div class="conflicts" id="conflict-box"><h3>⚠ Sync conflict copies</h3><ul id="conflict-list"></ul></div>
-      <div class="conflicts" id="merge-box"><h3>⚠ Diverged from remote (would conflict)</h3><ul id="merge-list"></ul></div>
+      <div class="conflicts" id="merge-box"><h3>⚠ Auto-merged with remote (check these when you can)</h3><ul id="merge-list"></ul></div>
     </div>
 
     <div class="card" id="tree-panel" style="grid-column:1/-1">
@@ -204,7 +204,7 @@
       const any = [
         fillList('alert-box', 'alert-list', alerts.map(a => `${a.title} (since ${when(a.since)})`)),
         fillList('conflict-box', 'conflict-list', bridge.conflicts),
-        fillList('merge-box', 'merge-list', bridge.mergeConflicts),
+        fillList('merge-box', 'merge-list', (bridge.autoMerges || []).map(m => `${when(m.at)} · ${m.path}: ${m.text}`)),
       ].some(Boolean);
       $('problems').style.display = any ? 'block' : 'none';
       loadTree();

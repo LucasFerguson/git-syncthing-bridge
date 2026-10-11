@@ -10,7 +10,7 @@ import { checkVault } from './vaultFiles.js';
 import { writeStatusNote } from './statusNote.js';
 
 // One sync cycle, strictly serialized:
-//   Syncthing settled? → conflict copies? → commit → fetch → rebase (folder paused) → push
+//   Syncthing settled? → conflict copies? → commit → fetch → replay onto remote (folder paused) → push
 // Requests that arrive while a cycle runs set `rerun`, so the cycle repeats
 // once it finishes instead of overlapping or being dropped.
 
@@ -18,6 +18,8 @@ export const syncEvents = new EventEmitter();
 
 // Remote/network failures only alert after this long, so a brief outage is silent.
 const REMOTE_ALERT_MS = 60 * 60 * 1000;
+// How many auto-merge resolutions the dashboard remembers.
+const MAX_AUTO_MERGES = 30;
 const PAUSE_MARKER = join(config.vaultPath, '.git', 'bridge-paused-syncthing');
 
 const state = {
@@ -27,7 +29,7 @@ const state = {
   lastFetchAt: null,
   lastPushAt: null,
   conflicts: [],
-  mergeConflicts: [],
+  autoMerges: [], // newest first: { at, path, how, text }
   lastError: null,
 };
 const failingSince = {}; // op -> timestamp of first consecutive failure
@@ -36,6 +38,7 @@ const failingSince = {}; // op -> timestamp of first consecutive failure
 async function commitWithStatus() {
   return gm.commitLocal({
     quietPath: config.statusNote,
+    sources: st.changeSources,
     beforeCommit: async () => writeStatusNote({
       committedAt: new Date(),
       lastPushAt: state.lastPushAt ?? await gm.remoteHeadDate(),
@@ -148,29 +151,31 @@ async function cycle(trigger) {
       return failed('remote', err, 'Cannot reach git remote');
     }
 
-    // 5. Integrate remote changes. Rebase rewrites files, so Syncthing is paused
-    // around it and told to rescan afterwards.
+    // 5. Integrate remote changes. This rewrites files, so Syncthing is paused
+    // around it and told to rescan afterwards. Conflicts are resolved
+    // automatically (see gm.replayOntoRemote) so syncing never stops for them.
     if (await gm.behindCount() > 0) {
-      state.mergeConflicts = await gm.remoteMergeConflicts();
-      if (state.mergeConflicts.length) {
-        alert('diverged', 'Vault diverged from remote',
-          `Local and remote both changed: ${state.mergeConflicts.join(', ')}. Still committing locally; pushes are on hold until this is resolved by hand.`);
-        return;
-      }
-      setPhase('rebasing');
+      setPhase('merging');
+      let result;
       try {
         await withFolderPaused(async () => {
           await commitWithStatus(); // anything that landed between step 3 and the pause
-          await gm.rebaseOntoRemote();
+          result = await gm.replayOntoRemote();
         });
       } catch (err) {
-        alert('diverged', 'Vault diverged from remote', `${err.message}\nStill committing locally; pushes are on hold until this is resolved by hand.`);
+        alert('diverged', 'Could not merge remote changes', `${err.message}\nStill committing locally; pushes are on hold until this is fixed.`);
         return;
       }
-      log.info('Rebased onto remote');
       resolve('diverged');
+      const at = new Date().toISOString();
+      for (const n of result.notes) {
+        const line = `Auto-merged with remote (${n.how}): ${n.path}`;
+        if (n.how === 'merged') log.info(line); else log.warn(line, { detail: n.text });
+      }
+      const flagged = result.notes.filter(n => n.how !== 'merged');
+      state.autoMerges = [...flagged.map(n => ({ at, ...n })), ...state.autoMerges].slice(0, MAX_AUTO_MERGES);
+      log.info(result.notes.length ? 'Merged remote changes' : 'Rebased onto remote', { resolved: result.notes.length });
     }
-    state.mergeConflicts = [];
 
     // 6. Push.
     await maybePush();

@@ -2,12 +2,12 @@ import { readFile, writeFile, access, readdir, statfs } from 'fs/promises';
 import { join } from 'path';
 import config from './config.js';
 import { log } from './logger.js';
-import { gitIgnores, pathKind } from './gitManager.js';
+import { gitIgnores, pathKind, mergeDriver } from './gitManager.js';
 import { getIgnores, setIgnores } from './syncthing.js';
 import { writeStatusNote } from './statusNote.js';
 
 // Vault files the bridge relies on. The rule is: add what is missing, never
-// overwrite. .gitignore and .stignore each get one marked block owned by the
+// overwrite. .gitignore, .gitattributes and .stignore each get one marked block owned by the
 // bridge; every line outside it belongs to the vault and is left untouched.
 // checkVault() then verifies the *effective* rules (what git and Syncthing
 // actually do), because an existing line elsewhere can still defeat them.
@@ -26,6 +26,18 @@ function gitignoreBlock() {
     '.stfolder', '.stfolder/', '.stignore', '.stversions/', '*.sync-conflict-*', '.syncthing.*.tmp', '~syncthing~*.tmp',
     '# Obsidian per-device UI state and trash',
     '.obsidian/workspace.json', '.obsidian/workspace-mobile.json', '.trash/',
+    GIT_END,
+  ];
+}
+
+// Union merge: when a note was edited on two devices, git keeps both sides'
+// lines instead of conflicting. Only for notes: union would corrupt JSON
+// (.obsidian, canvases), and binary files are kept as two copies instead.
+function gitattributesBlock() {
+  return [
+    GIT_BEGIN,
+    '# Notes edited on two devices merge by keeping both versions\' lines (tidy up by hand).',
+    '*.md merge=union',
     GIT_END,
   ];
 }
@@ -81,6 +93,15 @@ export async function ensureVaultFiles() {
     log.info(giText ? 'Added bridge block to existing .gitignore (your lines untouched)' : 'Created .gitignore');
   }
 
+  const ga = join(v, '.gitattributes');
+  const gaText = (await exists(ga)) ? await readFile(ga, 'utf8') : '';
+  const gaLines = gaText ? gaText.replace(/\n$/, '').split('\n') : [];
+  const gaNext = withBlock(gaLines, gitattributesBlock(), GIT_BEGIN, GIT_END, false);
+  if (!same(gaLines, gaNext)) {
+    await writeFile(ga, gaNext.join('\n') + '\n');
+    log.info(gaText ? 'Added bridge block to existing .gitattributes (your lines untouched)' : 'Created .gitattributes');
+  }
+
   const { ignore } = await getIgnores();
   const stNext = withBlock(ignore, stignoreBlock(), ST_BEGIN, ST_END, true);
   if (!same(ignore, stNext)) {
@@ -129,6 +150,20 @@ export async function checkVault() {
   }
   add('git-keeps', 'git keeps notes and photos', !keptOut.length,
     keptOut.length ? `Your .gitignore excludes: ${keptOut.join(', ')}` : '');
+
+  // Effective merge rules
+  const gaExists = await exists(join(v, '.gitattributes'));
+  const driver = await mergeDriver('Note.md');
+  add('git-union', 'Notes merge with union (.gitattributes: *.md merge=union)', driver === 'union',
+    driver === 'union' ? ''
+      : !gaExists ? '.gitattributes is missing (restart the bridge to create it). Notes edited on two devices are kept as two copies instead of merged.'
+      : `Notes resolve as merge=${driver}: a line in .gitattributes overrides the bridge block. Notes edited on two devices are kept as two copies instead of merged.`);
+  if (gaExists) {
+    const kind = await pathKind('.gitattributes');
+    add('gitattributes-git', '.gitattributes is committed to git (so other devices merge the same way)',
+      kind === 'tracked' ? true : kind === 'new' ? null : false,
+      kind === 'ignored' ? 'A .gitignore line ignores .gitattributes.' : kind === 'new' ? 'Will be committed on the next cycle.' : '');
+  }
 
   // Effective Syncthing rules
   const { ignore, expanded } = await getIgnores();
